@@ -24,7 +24,7 @@ class MirroredRepo:
     upstream_image: str
     repository_uri: str
     upstream_tags: List[str]
-
+    upstream_default_tag: str = "latest"
 
 @click.group()
 @click.option("--registry-id", help="The registry ID. This is usually your AWS account ID.")
@@ -76,6 +76,7 @@ def copy(ctx, source, destination_repository):
             upstream_image=upstream_image,
             upstream_tags=[upstream_tag],
             repository_uri=destination_repository,
+            upstream_default_tag=upstream_tag,
         )
     ]
     copy_repositories(ctx.obj.client, ctx.obj.registry_id, repositories)
@@ -116,12 +117,12 @@ def copy_repositories(
     items = [
         (repo, tag)
         for repo in repositories
-        for tag in find_tags_to_copy(repo.upstream_image, repo.upstream_tags)
+        for tag in find_tags_to_copy(repo.upstream_image, repo.upstream_tags, repo.upstream_default_tag)
     ]
     click.echo(f"Beginning the copy of {len(items)} images")
 
     with ThreadPoolExecutor() as pool:
-        # This code aint' beautiful, but whatever 🤷‍
+        # This code ain't beautiful, but whatever 🤷‍
         pool.map(
             lambda item: copy_image(
                 f"{item[0].upstream_image}:{item[1]}",
@@ -154,12 +155,12 @@ def copy_image(source_image, dest_image, token):
         click.secho(f'Last output: {e.output[100:]}', fg="red")
 
 
-def find_tags_to_copy(image_name, tag_patterns):
+def find_tags_to_copy(image_name, tag_patterns, default_tag="latest"):
     """
     Use Skopeo to list all available tags for an image
     """
     output = subprocess.check_output(
-        ["skopeo", "inspect", f"docker://{image_name}", "--override-os=linux"]
+        ["skopeo", "inspect", f"docker://{image_name}:{default_tag}", "--override-os=linux"]
     )
     all_tags = json.loads(output)["RepoTags"]
 
@@ -193,6 +194,7 @@ def find_repositories(client: ECRClient, registry_id: str):
                 upstream_image=tags_dict["upstream-image"],
                 upstream_tags=tags_dict.get("upstream-tags", "").replace("+", "*").split("/"),
                 repository_uri=repo["repositoryUri"],
+                upstream_default_tag=tags_dict.get("upstream-default-tag", "latest")
             )
 
     with ThreadPoolExecutor() as pool:
